@@ -1,4 +1,4 @@
-# 🚀 BookMail Vercel Deployment Guide
+# 🚀 BookMail Admin MVP - Vercel Deployment Guide
 
 ## 📋 Overview
 Deploy your BookMail app to Vercel with automated hourly email delivery using Vercel Cron Jobs.
@@ -17,7 +17,7 @@ vercel
 
 # Follow the prompts:
 # - Link to existing project? No (first time)
-# - What's your project name? bookmail-mvp (or whatever you prefer)
+# - What's your project name? bookmail-admin-mvp (or whatever you prefer)
 # - Which directory? ./ (current directory)
 # - Want to modify settings? No
 ```

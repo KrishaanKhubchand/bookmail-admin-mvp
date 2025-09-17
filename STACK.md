@@ -1,4 +1,4 @@
-# BookMail MVP - Technology Stack
+# BookMail Admin MVP - Technology Stack
 
 ## Core Technologies
 

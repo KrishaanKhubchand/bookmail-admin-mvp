@@ -1,6 +1,6 @@
 1. Overview
 
-BookMail MVP is an admin-driven email drip system.
+BookMail Admin MVP is an admin-driven email drip system.
 
 Admins can create users and assign them one or more books in a defined sequence.
 

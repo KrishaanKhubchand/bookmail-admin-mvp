@@ -5,7 +5,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen grid grid-cols-[220px_1fr]">
       <aside className="border-r border-black/[.08] dark:border-white/[.145] p-4 space-y-4">
-        <div className="text-lg font-semibold">BookMail Admin</div>
+        <div className="text-lg font-semibold">BookMail Admin MVP</div>
         <nav className="flex flex-col gap-2">
           <Link href="/users" className="hover:underline">Users</Link>
           <Link href="/books" className="hover:underline">Books</Link>

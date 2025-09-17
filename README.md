@@ -1,4 +1,4 @@
-# BookMail MVP
+# BookMail Admin MVP
 
 Admin dashboard for managing email-based book lessons. Users are assigned books that are delivered as daily emails. This project implements the core workflows for user management, book assignment, and progress tracking.
 
