@@ -68,13 +68,11 @@ export const ALL_HOURS = Array.from({length: 24}, (_, i) => ({
   }).replace(':00 ', ' ')
 }))
 
-// Generate minutes in 15-minute intervals
-export const MINUTE_OPTIONS = [
-  { value: 0, label: '00' },
-  { value: 15, label: '15' },
-  { value: 30, label: '30' },
-  { value: 45, label: '45' }
-]
+// Generate all 60 minutes (0-59) for full minute precision
+export const MINUTE_OPTIONS = Array.from({length: 60}, (_, i) => ({
+  value: i,
+  label: i.toString().padStart(2, '0')
+}))
 
 // Quick select options (subset of common times)
 export const QUICK_SELECT_TIMES = [

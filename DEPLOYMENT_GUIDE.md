@@ -18,87 +18,52 @@ This guide walks you through deploying the complete automated email delivery sys
 - `POST /api/debug/logs/retry` - Retry failed email deliveries
 - All existing debug APIs work with new logging
 
-### ✅ **Edge Functions (Ready to Deploy)**
-- `email-scheduler` - Production hourly email delivery
-- `test-scheduler` - Testing and simulation with custom times
+### ✅ **Email Scheduling (Ready to Deploy)**
+- Vercel Cron - Production hourly email delivery via `/api/cron/email-scheduler`
 
 ## 🛠️ Deployment Steps
 
-### **Step 1: Deploy Edge Functions to Supabase**
+### **Step 1: Set Environment Variables**
 
-1. **Install Supabase CLI** (if not already installed):
-   ```bash
-   npm install -g supabase
-   ```
-
-2. **Login to Supabase**:
-   ```bash
-   supabase login
-   ```
-
-3. **Link to your project**:
-   ```bash
-   supabase link --project-ref YOUR_PROJECT_ID
-   ```
-
-4. **Copy the Edge Functions**:
-   ```bash
-   # Create functions directory in your project
-   mkdir -p supabase/functions
-   
-   # Copy the email-scheduler function
-   cp -r supabase-functions/email-scheduler supabase/functions/
-   
-   # Copy the test-scheduler function  
-   cp -r supabase-functions/test-scheduler supabase/functions/
-   ```
-
-5. **Deploy the Functions**:
-   ```bash
-   supabase functions deploy email-scheduler
-   supabase functions deploy test-scheduler
-   ```
-
-### **Step 2: Set Environment Variables in Supabase**
-
-In your Supabase Dashboard → Project Settings → Edge Functions → Environment Variables:
+Ensure these environment variables are set in your deployment environment:
 
 ```bash
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 RESEND_API_KEY=your_resend_api_key_here
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
-### **Step 3: Set Up Automated Hourly Execution**
+### **Step 2: Deploy to Vercel (Automated Hourly Execution)**
 
-Run this SQL in your Supabase SQL Editor:
+The app uses Vercel Cron for automated hourly execution - no additional setup needed!
 
-```sql
--- Enable the pg_cron extension (if not already enabled)
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-
--- Schedule the email-scheduler to run every hour
-SELECT cron.schedule(
-  'bookmail-email-scheduler',
-  '0 * * * *',  -- Every hour at minute 0
-  $$
-    SELECT net.http_post(
-      url := 'https://YOUR_PROJECT_ID.supabase.co/functions/v1/email-scheduler',
-      headers := jsonb_build_object(
-        'Authorization', 'Bearer ' || current_setting('app.service_role_key'),
-        'Content-Type', 'application/json'
-      )
-    );
-  $$
-);
+**Deployment:**
+```bash
+# Deploy to Vercel
+vercel --prod
 ```
 
-**Replace `YOUR_PROJECT_ID` with your actual Supabase project ID.**
+**Vercel Configuration (already configured in `vercel.json`):**
+```json
+{
+  "crons": [{
+    "path": "/api/cron/email-scheduler",
+    "schedule": "0 * * * *"
+  }]
+}
+```
 
-### **Step 4: Test the Complete System**
+**After deployment:**
+- Emails will be sent automatically every hour at minute 0 (UTC)
+- Monitor execution in Vercel Functions dashboard
+- View logs in your app at `/debug/scheduled-email-timeline`
+
+### **Step 3: Test the Complete System**
 
 1. **Test Connection**: Visit `/debug/email` → Test Resend connection
 2. **Test Manual Send**: Send a lesson to yourself via `/debug/email`
-3. **Test Scheduler**: Use `/debug/scheduler` to simulate different times
+3. **Test Scheduler**: Use `/debug/scheduling-simulations` to test production scheduler
 4. **Check Logs**: View results in `/debug/logs`
 5. **Test Retry**: Trigger a failure and use the retry feature
 

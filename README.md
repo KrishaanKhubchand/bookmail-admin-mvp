@@ -41,6 +41,29 @@ The app expects these Supabase tables with RLS enabled:
 
 See `docs/schemas/` for detailed table schemas.
 
+## Email Scheduler System
+
+The app includes an automated email scheduling system that delivers book lessons to users at their preferred times.
+
+### Current Architecture (Vercel Cron)
+- **Scheduler**: Vercel Cron job running hourly (`0 * * * *`)
+- **Endpoint**: `/api/cron/email-scheduler` (Next.js API route)
+- **Database**: PostgreSQL with timezone-aware functions
+- **Email Service**: Resend API
+- **Logging**: Full audit trail in `scheduler_runs` and `email_logs` tables
+
+### How It Works
+1. **Every hour**, Vercel triggers the cron job
+2. **Database function** finds users whose local delivery time matches the current hour
+3. **For each eligible user**: Fetches next lesson, sends email, updates progress
+4. **Everything is logged** for monitoring and debugging
+
+### Testing & Debugging
+- **Debug UI**: `/debug/scheduling-simulations` - Test specific times/timezones
+- **Manual trigger**: Use "Test Vercel Cron" button in debug UI
+- **Logs**: View scheduler runs at `/debug/scheduled-email-timeline`
+- **Database**: Check `scheduler_runs` table for execution history
+
 ## Documentation
 
 ### Email Scheduler System

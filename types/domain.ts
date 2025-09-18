@@ -29,14 +29,19 @@ export interface UserBook {
   userId: UUID;
   bookId: UUID;
   orderIndex: number;
+  // Progress tracking fields (migrated from UserProgress)
+  lastLessonSent: number;
+  progressUpdatedAt: string;
+  assignedAt: string;
 }
 
-export interface UserProgress {
+// UserProgress interface removed - now consolidated into UserBook
+
+export interface UserDeliveryTime {
   id: UUID;
   userId: UUID;
-  bookId: UUID;
-  lastLessonSent: number;
-  updatedAt: string;
+  deliveryTime: string;
+  createdAt: string;
 }
 
 export interface AssignedBookDetail {

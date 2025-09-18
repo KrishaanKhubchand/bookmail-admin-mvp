@@ -1,19 +1,15 @@
 import { NextResponse } from 'next/server'
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-
 export async function POST() {
   try {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-      throw new Error('Missing Supabase configuration')
-    }
-
-    // Call the email-scheduler Edge Function
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/email-scheduler`, {
+    // Call the Vercel Cron API instead of Edge Function
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3002'
+    
+    const response = await fetch(`${baseUrl}/api/cron/email-scheduler`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
         'Content-Type': 'application/json'
       }
     })

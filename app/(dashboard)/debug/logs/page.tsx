@@ -28,6 +28,7 @@ interface EmailLog {
   } | null
 }
 
+
 interface LogStats {
   time_period: {
     hours: number
@@ -87,6 +88,7 @@ export default function EmailLogsPage() {
   const [retryResult, setRetryResult] = useState<RetryResult | null>(null)
   const [error, setError] = useState('')
   const [viewMode, setViewMode] = useState<'historical' | 'upcoming'>('historical')
+  
 
   useEffect(() => {
     loadLogs()
@@ -150,6 +152,7 @@ export default function EmailLogsPage() {
       setIsLoadingStats(false)
     }
   }
+
 
   async function retryFailedEmails() {
     if (selectedLogs.size === 0) {
@@ -300,6 +303,7 @@ export default function EmailLogsPage() {
         </div>
       )}
 
+
       {/* Upcoming Stats Dashboard */}
       {viewMode === 'upcoming' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -327,6 +331,7 @@ export default function EmailLogsPage() {
         </div>
       )}
 
+
       {/* Filters and Actions */}
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
         <div className="flex items-center gap-4">
@@ -346,7 +351,7 @@ export default function EmailLogsPage() {
                   <option value={72}>Next 3 Days</option>
                 </>
               ) : (
-                // Existing options for historical
+                // Historical options
                 <>
                   <option value={1}>Last Hour</option>
                   <option value={6}>Last 6 Hours</option>
@@ -393,11 +398,16 @@ export default function EmailLogsPage() {
           )}
           
           <button
-            onClick={loadLogs}
-            disabled={isLoadingLogs}
+            onClick={() => {
+              loadLogs()
+              if (viewMode === 'historical') {
+                loadStats()
+              }
+            }}
+            disabled={isLoadingLogs || isLoadingStats}
             className="px-4 py-2 border rounded hover:bg-gray-50 text-sm"
           >
-            {isLoadingLogs ? '🔄 Loading...' : '🔄 Refresh'}
+            {(isLoadingLogs || isLoadingStats) ? '🔄 Loading...' : '🔄 Refresh'}
           </button>
         </div>
       </div>
@@ -450,18 +460,19 @@ export default function EmailLogsPage() {
       )}
 
       {/* Email Logs Table */}
-      <div className="border dark:border-gray-600 rounded-lg overflow-hidden bg-white dark:bg-gray-800">
-        <div className="px-4 py-3 bg-gray-50 dark:bg-gray-700 border-b dark:border-gray-600">
-          <h2 className="text-lg font-semibold dark:text-white">
-            {viewMode === 'historical' ? '📧 Email Delivery Details' : '🔮 Upcoming Email Schedule'}
-          </h2>
-          <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-            {viewMode === 'historical' 
-              ? `${logs.length} emails in selected time period`
-              : `${logs.length} emails scheduled for next ${selectedHours} hours`
-            }
+      {(viewMode === 'historical' || viewMode === 'upcoming') && (
+        <div className="border dark:border-gray-600 rounded-lg overflow-hidden bg-white dark:bg-gray-800">
+          <div className="px-4 py-3 bg-gray-50 dark:bg-gray-700 border-b dark:border-gray-600">
+            <h2 className="text-lg font-semibold dark:text-white">
+              {viewMode === 'historical' ? '📧 Email Delivery Details' : '🔮 Upcoming Email Schedule'}
+            </h2>
+            <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+              {viewMode === 'historical' 
+                ? `${logs.length} emails in selected time period`
+                : `${logs.length} emails scheduled for next ${selectedHours} hours`
+              }
+            </div>
           </div>
-        </div>
         
         {isLoadingLogs ? (
           <div className="p-8 text-center text-gray-500 dark:text-gray-400">
@@ -563,7 +574,9 @@ export default function EmailLogsPage() {
             </table>
           </div>
         )}
-      </div>
+        </div>
+      )}
+
 
       {/* Top Users & Books */}
       {viewMode === 'historical' && stats && (stats.top_users.length > 0 || stats.top_books.length > 0) && (

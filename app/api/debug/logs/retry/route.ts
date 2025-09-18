@@ -126,12 +126,13 @@ export async function POST(request: Request) {
 
         // Update user progress if this was the next lesson
         const { error: progressError } = await supabase
-          .from('user_progress')
-          .upsert({
-            user_id: log.user_id,
-            book_id: log.lessons.book_id,
-            last_lesson_sent: log.lessons.day_number
+          .from('user_books')
+          .update({
+            last_lesson_sent: log.lessons.day_number,
+            progress_updated_at: new Date().toISOString()
           })
+          .eq('user_id', log.user_id)
+          .eq('book_id', log.lessons.book_id)
 
         if (progressError) {
           console.error('Error updating progress:', progressError)

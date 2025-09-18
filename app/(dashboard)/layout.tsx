@@ -13,9 +13,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="border-t pt-2 mt-4">
             <div className="text-sm text-gray-600 mb-2">Debug</div>
             <div className="flex flex-col gap-1">
-              <Link href="/debug/scheduler" className="hover:underline text-sm">📧 Scheduler</Link>
               <Link href="/debug/email" className="hover:underline text-sm">✉️ Email (Resend)</Link>
               <Link href="/debug/logs" className="hover:underline text-sm">📊 Email Logs</Link>
+              <Link href="/debug/scheduled-email-timeline" className="hover:underline text-sm">📅 Email Timeline</Link>
+              <Link href="/debug/scheduling-simulations" className="hover:underline text-sm">🧪 Scheduler Testing</Link>
             </div>
           </div>
         </nav>

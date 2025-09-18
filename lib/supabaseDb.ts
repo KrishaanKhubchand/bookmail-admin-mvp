@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { User, Book, Lesson, UserProgress, AssignedBookDetail, UserDeliveryTime } from '@/types/domain'
+import type { User, Book, Lesson, UserBook, AssignedBookDetail, UserDeliveryTime } from '@/types/domain'
 
 // Users functions
 export async function listUsers(): Promise<User[]> {
@@ -158,7 +158,11 @@ export async function getAssignedBooks(userId: string): Promise<AssignedBookDeta
         id: row.id,
         userId: row.user_id,
         bookId: row.book_id,
-        orderIndex: row.order_index
+        orderIndex: row.order_index,
+        // New progress fields from consolidated user_books table
+        lastLessonSent: row.last_lesson_sent || 0,
+        progressUpdatedAt: row.progress_updated_at,
+        assignedAt: row.assigned_at
       },
       book: {
         id: row.book.id,
@@ -176,12 +180,14 @@ export async function getAssignedBooks(userId: string): Promise<AssignedBookDeta
   }
 }
 
-export async function getProgress(userId: string): Promise<UserProgress | null> {
+export async function getCurrentBookProgress(userId: string): Promise<UserBook | null> {
   try {
     const { data, error } = await supabase
-      .from('user_progress')
+      .from('user_books')
       .select('*')
       .eq('user_id', userId)
+      .order('order_index')
+      .limit(1)
       .single()
     
     if (error) {
@@ -193,24 +199,26 @@ export async function getProgress(userId: string): Promise<UserProgress | null> 
       id: data.id,
       userId: data.user_id,
       bookId: data.book_id,
-      lastLessonSent: data.last_lesson_sent,
-      updatedAt: data.updated_at
+      orderIndex: data.order_index,
+      lastLessonSent: data.last_lesson_sent || 0,
+      progressUpdatedAt: data.progress_updated_at,
+      assignedAt: data.assigned_at
     }
   } catch (error) {
-    console.error('Error getting progress:', error)
+    console.error('Error getting current book progress:', error)
     return null
   }
 }
 
 export async function computeProgressPercent(userId: string): Promise<number> {
   try {
-    const progress = await getProgress(userId)
-    if (!progress) return 0
+    const currentBook = await getCurrentBookProgress(userId)
+    if (!currentBook) return 0
     
-    const lessons = await listLessonsForBook(progress.bookId)
+    const lessons = await listLessonsForBook(currentBook.bookId)
     if (lessons.length === 0) return 0
     
-    return Math.min(100, Math.round((progress.lastLessonSent / lessons.length) * 100))
+    return Math.min(100, Math.round((currentBook.lastLessonSent / lessons.length) * 100))
   } catch (error) {
     console.error('Error computing progress:', error)
     return 0
@@ -228,12 +236,14 @@ export async function setAssignedBooks(userId: string, bookIdsInOrder: string[])
     
     if (deleteError) throw deleteError
     
-    // Insert new assignments with order
+    // Insert new assignments with order and initialize progress
     if (bookIdsInOrder.length > 0) {
       const assignments = bookIdsInOrder.map((bookId, index) => ({
         user_id: userId,
         book_id: bookId,
-        order_index: index + 1
+        order_index: index + 1,
+        last_lesson_sent: 0,  // Initialize progress
+        assigned_at: new Date().toISOString()
       }))
       
       const { error: insertError } = await supabase
@@ -242,8 +252,7 @@ export async function setAssignedBooks(userId: string, bookIdsInOrder: string[])
       
       if (insertError) throw insertError
       
-      // Initialize progress for first book if not exists
-      await initializeProgress(userId, bookIdsInOrder[0])
+      // No longer need separate initializeProgress call - progress initialized above
     }
   } catch (error) {
     console.error('Error setting assigned books:', error)
@@ -251,31 +260,21 @@ export async function setAssignedBooks(userId: string, bookIdsInOrder: string[])
   }
 }
 
-export async function initializeProgress(userId: string, bookId: string): Promise<void> {
+export async function updateUserProgress(userId: string, bookId: string, lessonNumber: number): Promise<void> {
   try {
-    // Check if progress already exists
-    const { data: existing } = await supabase
-      .from('user_progress')
-      .select('id')
+    const { error } = await supabase
+      .from('user_books')
+      .update({
+        last_lesson_sent: lessonNumber,
+        progress_updated_at: new Date().toISOString()
+      })
       .eq('user_id', userId)
       .eq('book_id', bookId)
-      .single()
-    
-    if (existing) return // Already exists
-    
-    // Create new progress record
-    const { error } = await supabase
-      .from('user_progress')
-      .insert({
-        user_id: userId,
-        book_id: bookId,
-        last_lesson_sent: 0
-      })
     
     if (error) throw error
   } catch (error) {
-    console.error('Error initializing progress:', error)
-    // Don't throw - this is not critical
+    console.error('Error updating user progress:', error)
+    throw new Error(`Failed to update progress: ${error.message}`)
   }
 }
 

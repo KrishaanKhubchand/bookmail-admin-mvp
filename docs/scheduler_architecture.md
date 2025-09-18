@@ -2,7 +2,7 @@
 
 ## System Architecture Overview
 
-The BookMail email scheduler is built on a modern serverless architecture using Supabase as the backend platform. The system leverages PostgreSQL for data storage, Edge Functions for execution logic, and pg_cron for scheduling.
+The BookMail email scheduler is built on a modern serverless architecture using Vercel Cron for scheduling and Next.js API routes for execution logic, with Supabase PostgreSQL for data storage and timezone-aware processing.
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
@@ -13,27 +13,33 @@ The BookMail email scheduler is built on a modern serverless architecture using 
           └──────────────────────┼───────────────────────┘
                                  │
                     ┌────────────▼─────────────┐
-                    │      API Routes          │
-                    │   (Next.js API)          │
+                    │      Next.js API         │
+                    │   /api/cron/email-       │
+                    │     scheduler            │
                     └────────────┬─────────────┘
                                  │
                     ┌────────────▼─────────────┐
                     │   Supabase Client        │
-                    │   (Authentication)       │
+                    │   (Service Role)         │
                     └────────────┬─────────────┘
                                  │
     ┌────────────────────────────┼────────────────────────────┐
-    │                    Supabase Backend                     │
+    │                  Supabase PostgreSQL                    │
     │                                                         │
     │  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐ │
-    │  │ PostgreSQL  │  │ Edge         │  │ pg_cron        │ │
-    │  │ Database    │  │ Functions    │  │ Scheduler      │ │
+    │  │   Tables    │  │   Functions  │  │     Views      │ │
     │  │             │  │              │  │                │ │
-    │  │ • Tables    │  │ • Scheduler  │  │ • Hourly Runs  │ │
-    │  │ • Functions │  │ • Test       │  │ • Triggers     │ │
-    │  │ • RLS       │  │ • Debug      │  │ • Monitoring   │ │
+    │  │ • users     │  │ • timezone   │  │ • audit logs   │ │
+    │  │ • lessons   │  │   logic      │  │ • progress     │ │
+    │  │ • logs      │  │ • eligibility│  │ • reporting    │ │
     │  └─────────────┘  └──────────────┘  └────────────────┘ │
     └─────────────────────────────────────────────────────────┘
+                                 ▲
+                    ┌────────────┴─────────────┐
+                    │     Vercel Cron          │
+                    │   Schedule: 0 * * * *    │
+                    │   (Every hour at :00)    │
+                    └──────────────────────────┘
 ```
 
 ## Database Layer
@@ -207,126 +213,139 @@ GROUP BY b.id, b.title, b.author, b.description, b.created_at;
 
 ## Execution Layer
 
-### Edge Functions Architecture
+### Current Architecture: Vercel Cron + Next.js API
 
-#### `email-scheduler` (Primary Function)
-**Location**: `supabase/functions/email-scheduler/index.ts`
+#### Primary Scheduler: `/api/cron/email-scheduler`
+**Location**: `app/api/cron/email-scheduler/route.ts`
+
+**Triggered By**: Vercel Cron (hourly: `0 * * * *`)
 
 **Execution Flow**:
 1. **Initialize**: Create run ID and timestamp
-2. **Find Eligible Users**: Call `get_eligible_users_for_delivery(now())`
-3. **Process Each User**:
+2. **Log Start**: Insert into `scheduler_runs` table with status 'running'
+3. **Find Eligible Users**: Call `get_eligible_users_for_delivery(now())`
+4. **Process Each User**:
    - Call `get_next_lesson_for_user(user_id)`
    - Check if `should_send` is true
-   - Log decision to `email_logs` table
-   - (Future: Send email via Resend API)
-4. **Return Summary**: Count of eligible users, decisions made
+   - Send email via Resend API
+   - Log result to `email_logs` table
+   - Update `user_progress` table
+5. **Log Completion**: Update `scheduler_runs` with final statistics
+6. **Return Summary**: Count of eligible users, emails sent, errors
 
-**Triggered By**: pg_cron hourly job
+**Key Features**:
+- Uses service role key for full database access
+- Handles both GET (Vercel cron) and POST (manual testing) requests
+- Full TypeScript integration with existing codebase
+- Comprehensive error handling and logging
 
-**Key Code Structure**:
-```typescript
-serve(async (req) => {
-  const supabase = createClient(supabaseUrl, supabaseServiceKey)
-  const checkTime = new Date().toISOString()
-  const runId = crypto.randomUUID()
-  
-  // Get eligible users
-  const { data: eligibleUsers } = await supabase
-    .rpc('get_eligible_users_for_delivery', { check_time: checkTime })
-  
-  // Process each eligible user
-  for (const user of eligibleUsers?.filter(u => u.is_eligible) || []) {
-    const { data: lessonData } = await supabase
-      .rpc('get_next_lesson_for_user', { p_user_id: user.user_id })
-    
-    if (lesson && lesson.should_send) {
-      // Log scheduling decision
-      await supabase.from('email_logs').insert({
-        user_id: user.user_id,
-        lesson_id: lesson.lesson_id,
-        status: 'scheduled',
-        schedule_run_id: runId,
-        scheduled_for: checkTime,
-        delivery_reason: 'scheduled'
-      })
-    }
-  }
-})
+**Environment Variables Required**:
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+RESEND_API_KEY=your_resend_api_key
+RESEND_FROM_EMAIL=your_verified_sender_email
 ```
 
-#### `test-scheduler` (Debug Function)
-**Location**: `supabase/functions/test-scheduler/index.ts`
-
-**Purpose**: Manual testing and simulation with custom timestamps
-
-**Features**:
-- Accepts custom `check_time` parameter
-- Simulation mode (doesn't write to database)
-- Enhanced logging for debugging
-- Used by debug panel for real-time testing
-
-### Cron Job Configuration
-
-#### pg_cron Setup
-```sql
--- Schedule hourly execution
-SELECT cron.schedule(
-  'email-scheduler',
-  '0 * * * *',  -- Every hour at minute 0
-  $$
-    SELECT net.http_post(
-      url := 'https://your-project.supabase.co/functions/v1/email-scheduler',
-      headers := '{"Authorization": "Bearer ' || current_setting('app.service_role_key') || '"}'::jsonb
-    );
-  $$
-);
-```
-
-#### Monitoring Cron Jobs
-```sql
--- Check cron job status
-SELECT * FROM cron.job WHERE jobname = 'email-scheduler';
-
--- View cron job run history
-SELECT * FROM cron.job_run_details WHERE jobid = (
-  SELECT jobid FROM cron.job WHERE jobname = 'email-scheduler'
-) ORDER BY start_time DESC LIMIT 10;
-```
-
-## Frontend Integration Layer
-
-### Next.js API Routes
-
-#### Debug Panel APIs
-**`/api/debug/scheduler/run`**: Manual scheduler execution
-```typescript
-export async function POST() {
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/email-scheduler`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json'
-    }
-  })
-  return NextResponse.json(await response.json())
+**Vercel Configuration** (`vercel.json`):
+```json
+{
+  "crons": [{
+    "path": "/api/cron/email-scheduler",
+    "schedule": "0 * * * *"
+  }]
 }
 ```
 
-**`/api/debug/scheduler/simulate`**: Time simulation testing
-```typescript
-export async function POST(request: Request) {
-  const { test_time, timezone } = await request.json()
-  const testTimestamp = convertTimeInTimezoneToUTC(test_time, timezone)
-  
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/test-scheduler`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json'
-    },
+### Testing & Debug Tools
+
+#### Manual Testing API: `/api/debug/scheduler/test-vercel`
+**Purpose**: Manual trigger for testing the Vercel Cron endpoint
+
+#### Debug UI: `/debug/scheduling-simulations`
+**Features**:
+- Test Vercel Cron button
+- Timezone-specific simulations
+- Real-time testing without affecting production
+
+#### Monitoring: `/debug/scheduled-email-timeline`
+**Features**:
+- View recent scheduler runs
+- Filter by trigger source (`vercel_cron`)
+- Execution statistics and performance metrics
+
+---
+
+## Deprecated Approaches
+
+### ⚠️ GitHub Actions + Edge Functions (Deprecated)
+
+**Previous Architecture**:
+- GitHub Actions cron → Supabase Edge Function → Database
+- **Status**: Removed as of September 2025
+- **Location**: `.github/workflows/email-scheduler.yml` (removed)
+- **Edge Function**: `supabase-functions/email-scheduler/` (removed)
+
+**Issues that led to migration**:
+- Edge Function environment complexity
+- Silent failures difficult to debug
+- Separate deployment pipeline from main app
+- Limited TypeScript integration
+
+**Migration Path**: Use Vercel Cron approach above
+
+### ⚠️ pg_cron Database Scheduling (Considered but not implemented)
+
+**Approach**: PostgreSQL native cron jobs
+- **Status**: Evaluated but not implemented
+- **Reason**: Limited HTTP capabilities for email sending
+
+---
+
+## Current Data Flow
+
+### Hourly Execution Data Flow (Current - Vercel Cron)
+```
+1. Vercel Cron triggers → 2. /api/cron/email-scheduler
+                               ↓
+3. get_eligible_users_for_delivery(current_time)
+   ↓
+4. Filter users where is_eligible = true
+   ↓
+5. For each eligible user → get_next_lesson_for_user(user_id)
+                              ↓
+6. If lesson.should_send = true → Send email + Log to email_logs + Update progress
+                                      ↓
+7. Update scheduler_runs with final statistics
+                                      ↓
+8. Return summary (eligible count, sent count, errors, etc.)
+```
+
+### Debug Panel Data Flow
+```
+1. User clicks "Test Vercel Cron" → 2. Direct API call to /api/cron/email-scheduler
+                                         ↓
+3. Same execution flow as above but marked as manual trigger
+                                         ↓
+4. Return results to UI with test metadata
+```
+
+## Summary
+
+The current email scheduler architecture provides:
+
+- **Reliability**: Vercel Cron with native Next.js integration
+- **Observability**: Full logging and audit trail in database
+- **Testability**: Multiple testing approaches and debug interfaces  
+- **Scalability**: Serverless execution with PostgreSQL timezone handling
+- **Maintainability**: TypeScript codebase with shared libraries
+
+The migration from Edge Functions to Vercel Cron has simplified deployment, improved debugging capabilities, and provided better integration with the main application codebase.
+  // Test-scheduler functionality has been removed
+  // All testing now uses the production Vercel API endpoint
     body: JSON.stringify({
-      check_time: testTimestamp,
+      local_time: test_time,      // "09:00"
+      target_timezone: timezone,  // "Europe/Paris"
       simulate: true
     })
   })
@@ -334,34 +353,34 @@ export async function POST(request: Request) {
 }
 ```
 
-### Timezone Conversion Logic
+### Database-Centric Timezone Logic
 
-#### Core Conversion Function
-**Location**: `lib/timezone.ts`
+#### Core Database Function
+**Location**: Supabase Database
 
-**Purpose**: Convert user input time + timezone to accurate UTC timestamp
+**Purpose**: Let PostgreSQL handle all timezone math directly
 
 **Algorithm**:
-1. Parse input time (HH:MM format)
-2. Create initial UTC guess
-3. Check what local time this produces in target timezone
-4. Calculate difference and adjust UTC time
-5. Return accurate UTC timestamp
+1. Pass local time and timezone directly to database
+2. PostgreSQL matches users in that timezone with that delivery time
+3. No client-side timezone conversion needed!
+4. Handles DST automatically and reliably
 
-**Key Challenge Solved**: Daylight saving time and timezone offset handling
+**Key Benefits**: Eliminates complex timezone conversion, uses PostgreSQL's proven timezone handling
 
-```typescript
-export function convertTimeInTimezoneToUTC(timeString: string, timezone: string): string {
-  // Create initial UTC time guess
-  let testUTC = new Date(`${dateStr}T${timeStr}Z`)
-  
-  // Check what local time this produces
-  let localTimeStr = testUTC.toLocaleString('sv-SE', { 
-    timeZone: timezone,
-    hour12: false
-  })
-  
-  // Adjust if it doesn't match target
+```sql
+CREATE OR REPLACE FUNCTION get_eligible_users_for_local_time(
+  local_time time,
+  target_timezone text
+)
+RETURNS TABLE (...) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT ...
+  WHERE u.timezone = target_timezone
+    AND udt.delivery_time = local_time;
+END;
+$$;
   if (localTime !== timeString) {
     const diffMinutes = targetTotalMinutes - localTotalMinutes
     testUTC = new Date(testUTC.getTime() + (diffMinutes * 60 * 1000))
@@ -388,15 +407,13 @@ export function convertTimeInTimezoneToUTC(timeString: string, timezone: string)
 7. Return summary (eligible count, send count, etc.)
 ```
 
-### Debug Panel Data Flow
+### Debug Panel Data Flow (Current)
 ```
-1. User inputs time + timezone → 2. convertTimeInTimezoneToUTC()
-                                      ↓
-3. API call to test-scheduler with UTC timestamp
-                                      ↓
-4. Same logic as hourly execution but with custom time
-                                      ↓
-5. Return results to UI with conversion details
+1. User clicks "Run Scheduler Now" → 2. Direct API call to /api/cron/email-scheduler
+                                         ↓
+3. Same execution flow as production (current UTC time)
+                                         ↓
+4. Return results to UI with actual email sending
 ```
 
 ### User Management Data Flow

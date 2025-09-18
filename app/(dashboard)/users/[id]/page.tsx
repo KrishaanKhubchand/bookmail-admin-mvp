@@ -1,9 +1,9 @@
 "use client";
 
 import { use, useState, useEffect } from "react";
-import { listUsers, getAssignedBooks, listBooks, getProgress, listLessonsForBook, setAssignedBooks, getUserDeliveryTimes, setUserDeliveryTimes } from "@/lib/supabaseDb";
+import { listUsers, getAssignedBooks, listBooks, getCurrentBookProgress, listLessonsForBook, setAssignedBooks, getUserDeliveryTimes, setUserDeliveryTimes } from "@/lib/supabaseDb";
 import { formatDeliveryTime, parseTimeToString, ALL_HOURS, MINUTE_OPTIONS, QUICK_SELECT_TIMES } from "@/lib/time";
-import type { UUID, User, AssignedBookDetail, Book, UserProgress, UserDeliveryTime } from "@/types/domain";
+import type { UUID, User, AssignedBookDetail, Book, UserBook, UserDeliveryTime } from "@/types/domain";
 
 export default function UserDetailPage({ params }: { params: Promise<{ id: string }> }) {
   // Unwrap the params Promise
@@ -12,7 +12,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
   const [user, setUser] = useState<User | null>(null);
   const [assignedBooks, setAssignedBooksState] = useState<AssignedBookDetail[]>([]);
   const [allBooks, setAllBooks] = useState<Book[]>([]);
-  const [progress, setProgress] = useState<UserProgress | null>(null);
+  const [currentBook, setCurrentBook] = useState<UserBook | null>(null);
   const [currentLessons, setCurrentLessons] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
@@ -37,10 +37,10 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
     async function loadUserData() {
       try {
         setLoading(true);
-        const [users, assignedData, progressData, booksData, deliveryData] = await Promise.all([
+        const [users, assignedData, currentBookData, booksData, deliveryData] = await Promise.all([
           listUsers(),
           getAssignedBooks(userId),
-          getProgress(userId),
+          getCurrentBookProgress(userId),
           listBooks(),
           getUserDeliveryTimes(userId)
         ]);
@@ -48,14 +48,14 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
         const foundUser = users.find(u => u.id === userId);
         setUser(foundUser || null);
         setAssignedBooksState(assignedData);
-        setProgress(progressData);
+        setCurrentBook(currentBookData);
         setAllBooks(booksData);
         setSelected(assignedData.map(a => a.book.id));
         setDeliveryTimes(deliveryData);
         
         // Load lesson count for progress calculation
-        if (progressData) {
-          const lessons = await listLessonsForBook(progressData.bookId);
+        if (currentBookData) {
+          const lessons = await listLessonsForBook(currentBookData.bookId);
           setCurrentLessons(lessons.length);
         }
       } catch (error) {
@@ -77,7 +77,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
 
   if (!user) return <div>User not found.</div>;
 
-  const nextLesson = progress ? Math.min(progress.lastLessonSent + 1, currentLessons) : 0;
+  const nextLesson = currentBook ? Math.min(currentBook.lastLessonSent + 1, currentLessons) : 0;
 
   async function handleSaveAssign() {
     try {
@@ -87,17 +87,17 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
       setShowAssign(false);
       
       // Reload user data to show updated assignments
-      const [assignedData, progressData] = await Promise.all([
+      const [assignedData, currentBookData] = await Promise.all([
         getAssignedBooks(userId),
-        getProgress(userId)
+        getCurrentBookProgress(userId)
       ]);
       setAssignedBooksState(assignedData);
-      setProgress(progressData);
+      setCurrentBook(currentBookData);
       setSelected(assignedData.map(a => a.book.id));
       
       // Update lesson count if progress changed
-      if (progressData) {
-        const lessons = await listLessonsForBook(progressData.bookId);
+      if (currentBookData) {
+        const lessons = await listLessonsForBook(currentBookData.bookId);
         setCurrentLessons(lessons.length);
       }
     } catch (error) {
@@ -178,10 +178,10 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
 
       <section className="space-y-2">
         <h2 className="font-medium">Progress</h2>
-        {progress ? (
+        {currentBook ? (
           <div className="text-sm">
-            <div>Current Book: {allBooks.find(b => b.id === progress.bookId)?.title}</div>
-            <div>Last Lesson Sent: {progress.lastLessonSent} / {currentLessons}</div>
+            <div>Current Book: {allBooks.find(b => b.id === currentBook.bookId)?.title}</div>
+            <div>Last Lesson Sent: {currentBook.lastLessonSent} / {currentLessons}</div>
             <div>Next Lesson: {nextLesson}</div>
           </div>
         ) : (
