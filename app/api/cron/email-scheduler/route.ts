@@ -16,6 +16,20 @@ interface EligibleUser {
   is_eligible: boolean
 }
 
+interface EligibleBookAssignment {
+  user_book_id: string
+  user_id: string
+  user_email: string
+  user_timezone: string
+  book_id: string
+  book_title: string
+  delivery_time: string
+  last_lesson_sent: number
+  book_status: string
+  local_time: string
+  is_eligible: boolean
+}
+
 interface LessonData {
   lesson_id: string
   book_id: string
@@ -77,40 +91,41 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to log scheduler run start: ${runStartError.message}`)
     }
 
-    // Get eligible users for current time
-    const { data: eligibleUsers, error: usersError } = await supabase
-      .rpc('get_eligible_users_for_delivery', { 
+    // Get eligible book assignments for current time
+    const { data: eligibleBooks, error: booksError } = await supabase
+      .rpc('get_eligible_books_for_delivery', { 
         check_time: checkTime 
-      }) as { data: EligibleUser[] | null, error: any }
+      }) as { data: EligibleBookAssignment[] | null, error: any }
 
-    if (usersError) {
-      throw new Error(`Error fetching eligible users: ${usersError.message}`)
+    if (booksError) {
+      throw new Error(`Error fetching eligible books: ${booksError.message}`)
     }
 
-    const eligible = eligibleUsers?.filter(u => u.is_eligible) || []
-    console.log(`👥 Found ${eligible.length} eligible users`)
+    const eligible = eligibleBooks?.filter(b => b.is_eligible) || []
+    console.log(`📚 Found ${eligible.length} eligible book assignments`)
 
     const results: ProcessResult[] = []
     let sentCount = 0
     let errorCount = 0
 
-    // Process each eligible user
-    for (const user of eligible) {
+    // Process each eligible book assignment
+    for (const bookAssignment of eligible) {
       let lesson: LessonData | undefined
       
       try {
-        console.log(`🔄 Processing user: ${user.user_email}`)
+        console.log(`🔄 Processing: ${bookAssignment.user_email} - ${bookAssignment.book_title}`)
 
-        // Get next lesson for this user
+        // Get next lesson for this specific book
         const { data: lessonData, error: lessonError } = await supabase
-          .rpc('get_next_lesson_for_user', { 
-            p_user_id: user.user_id 
+          .rpc('get_next_lesson_for_book', { 
+            p_user_book_id: bookAssignment.user_book_id 
           }) as { data: LessonData[] | null, error: any }
 
         if (lessonError) {
-          console.error(`❌ Error fetching lesson for ${user.user_email}:`, lessonError)
+          console.error(`❌ Error fetching lesson:`, lessonError)
           results.push({
-            user_email: user.user_email,
+            user_email: bookAssignment.user_email,
+            book_title: bookAssignment.book_title,
             action: 'ERROR',
             error: `Database error: ${lessonError.message}`
           })
@@ -121,9 +136,10 @@ export async function POST(request: NextRequest) {
         lesson = lessonData?.[0]
         
         if (!lesson) {
-          console.log(`📭 No lesson data for ${user.user_email}`)
+          console.log(`📭 No lesson data for ${bookAssignment.book_title}`)
           results.push({
-            user_email: user.user_email,
+            user_email: bookAssignment.user_email,
+            book_title: bookAssignment.book_title,
             action: 'NO_CONTENT',
             error: 'No lesson data available'
           })
@@ -131,10 +147,17 @@ export async function POST(request: NextRequest) {
         }
 
         if (!lesson.should_send) {
-          console.log(`✅ User ${user.user_email} completed all lessons`)
+          console.log(`✅ Book completed: ${bookAssignment.book_title}`)
+          
+          // Update book status to completed
+          await supabase
+            .from('user_books')
+            .update({ status: 'completed' })
+            .eq('id', bookAssignment.user_book_id)
+          
           results.push({
-            user_email: user.user_email,
-            book_title: lesson.book_title,
+            user_email: bookAssignment.user_email,
+            book_title: bookAssignment.book_title,
             lesson_day: lesson.current_progress,
             progress: `${lesson.current_progress}/${lesson.total_lessons}`,
             action: 'COMPLETED'
@@ -150,10 +173,10 @@ export async function POST(request: NextRequest) {
           .single()
 
         if (contentError || !fullLesson) {
-          console.error(`❌ Error fetching lesson content for ${user.user_email}:`, contentError)
+          console.error(`❌ Error fetching lesson content:`, contentError)
           results.push({
-            user_email: user.user_email,
-            book_title: lesson.book_title,
+            user_email: bookAssignment.user_email,
+            book_title: bookAssignment.book_title,
             lesson_day: lesson.lesson_day_number,
             action: 'ERROR',
             error: 'Failed to fetch lesson content'
@@ -163,18 +186,19 @@ export async function POST(request: NextRequest) {
         }
 
         // Send email via Resend
-        console.log(`📤 Sending email to ${user.user_email}: ${lesson.lesson_subject}`)
+        console.log(`📤 Sending email to ${bookAssignment.user_email}: ${lesson.lesson_subject}`)
         
         const emailPayload = {
           from: process.env.RESEND_FROM_EMAIL!,
-          to: [user.user_email],
+          to: [bookAssignment.user_email],
           subject: lesson.lesson_subject,
           html: fullLesson.body_html,
           headers: {
             'X-BookMail-Scheduler': 'true',
             'X-BookMail-Run-ID': runId,
+            'X-BookMail-User-Book-ID': bookAssignment.user_book_id,
             'X-BookMail-Lesson-Day': lesson.lesson_day_number.toString(),
-            'X-BookMail-Book': lesson.book_title
+            'X-BookMail-Book': bookAssignment.book_title
           }
         }
 
@@ -195,14 +219,15 @@ export async function POST(request: NextRequest) {
         const emailResult = await emailResponse.json()
         const emailId = emailResult.id
 
-        console.log(`✅ Email sent successfully to ${user.user_email} - Resend ID: ${emailId}`)
+        console.log(`✅ Email sent successfully to ${bookAssignment.user_email} - Resend ID: ${emailId}`)
 
         // Log successful send
         await supabase
           .from('email_logs')
           .insert({
-            user_id: user.user_id,
+            user_id: bookAssignment.user_id,
             lesson_id: lesson.lesson_id,
+            book_id: bookAssignment.book_id,
             status: 'sent',
             schedule_run_id: runId,
             scheduled_for: checkTime,
@@ -216,23 +241,17 @@ export async function POST(request: NextRequest) {
             last_lesson_sent: lesson.lesson_day_number,
             progress_updated_at: new Date().toISOString()
           })
-          .eq('user_id', user.user_id)
-          .eq('book_id', lesson.book_id)
+          .eq('id', bookAssignment.user_book_id)
 
         if (progressError) {
-          console.error(`❌ Progress update failed for ${user.user_email}:`, progressError)
-          console.error('Progress data:', { 
-            user_id: user.user_id, 
-            book_id: lesson.book_id, 
-            last_lesson_sent: lesson.lesson_day_number 
-          })
+          console.error(`❌ Progress update failed:`, progressError)
         } else {
-          console.log(`✅ Progress updated: ${user.user_email} completed lesson ${lesson.lesson_day_number}`)
+          console.log(`✅ Progress updated: ${bookAssignment.user_email} - ${bookAssignment.book_title} lesson ${lesson.lesson_day_number}`)
         }
 
         results.push({
-          user_email: user.user_email,
-          book_title: lesson.book_title,
+          user_email: bookAssignment.user_email,
+          book_title: bookAssignment.book_title,
           lesson_day: lesson.lesson_day_number,
           progress: `${lesson.lesson_day_number}/${lesson.total_lessons}`,
           action: 'SENT',
@@ -242,14 +261,15 @@ export async function POST(request: NextRequest) {
         sentCount++
 
       } catch (emailError: any) {
-        console.error(`❌ Failed to send email to ${user.user_email}:`, emailError)
+        console.error(`❌ Failed to send email to ${bookAssignment.user_email}:`, emailError)
 
         // Log failed send
         await supabase
           .from('email_logs')
           .insert({
-            user_id: user.user_id,
+            user_id: bookAssignment.user_id,
             lesson_id: lesson?.lesson_id || null,
+            book_id: bookAssignment.book_id,
             status: 'failed',
             error: emailError.message,
             schedule_run_id: runId,
@@ -258,8 +278,8 @@ export async function POST(request: NextRequest) {
           })
 
         results.push({
-          user_email: user.user_email,
-          book_title: lesson?.book_title,
+          user_email: bookAssignment.user_email,
+          book_title: bookAssignment.book_title,
           lesson_day: lesson?.lesson_day_number,
           action: 'ERROR',
           error: emailError.message

@@ -1,4 +1,10 @@
-export function formatNextSendAt(timezone: string, hour: number = 9): string {
+export function formatNextSendAt(timezone: string | null | undefined, hour: number = 9): string {
+  // Handle null/undefined timezone with fallback
+  if (!timezone) {
+    return "—";  // Simple fallback, no timezone calculation
+  }
+  
+  // Rest of function stays exactly the same
   const now = new Date();
   const next = new Date(now);
   next.setDate(now.getDate() + 1);

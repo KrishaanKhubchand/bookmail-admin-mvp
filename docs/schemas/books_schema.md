@@ -16,7 +16,13 @@ It serves as the central repository for all book titles available in the platfor
 
 **author (text)**: The author(s) of the book.
 
-**description (text)**: A detailed description or summary of what the book covers.
+**description (text, nullable)**: A detailed description or summary of what the book covers.
+
+## Display Fields
+
+**book_cover_image_url (text, nullable)**: URL to the book's cover image.
+- Used in admin dashboard and user-facing views
+- Supports visual book identification and UI enhancement
 
 ## Relationships
 

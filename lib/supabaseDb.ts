@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { User, Book, Lesson, UserBook, AssignedBookDetail, UserDeliveryTime } from '@/types/domain'
+import type { User, Book, Lesson, UserBook, AssignedBookDetail, UserDeliveryTime, UserBookDeliveryTime } from '@/types/domain'
 
 // Users functions
 export async function listUsers(): Promise<User[]> {
@@ -48,6 +48,20 @@ export async function createUser(email: string, timezone: string): Promise<User>
   } catch (error) {
     console.error('Error creating user:', error)
     throw new Error(`Failed to create user: ${error.message}`)
+  }
+}
+
+export async function updateUserTimezone(userId: string, timezone: string): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('users')
+      .update({ timezone })
+      .eq('id', userId)
+    
+    if (error) throw error
+  } catch (error) {
+    console.error('Error updating timezone:', error)
+    throw new Error(`Failed to update timezone: ${error.message}`)
   }
 }
 
@@ -146,7 +160,8 @@ export async function getAssignedBooks(userId: string): Promise<AssignedBookDeta
       .from('user_books')
       .select(`
         *,
-        book:books(*)
+        book:books(*),
+        delivery_times:user_book_delivery_times(delivery_time)
       `)
       .eq('user_id', userId)
       .order('order_index')
@@ -170,7 +185,8 @@ export async function getAssignedBooks(userId: string): Promise<AssignedBookDeta
         author: row.book.author,
         description: row.book.description,
         createdAt: row.book.created_at
-      }
+      },
+      deliveryTimes: (row.delivery_times || []).map((dt: any) => dt.delivery_time)
     }))
     
     return assignedBooks
@@ -330,6 +346,61 @@ export async function setUserDeliveryTimes(
   } catch (error) {
     console.error('Error setting delivery times:', error)
     throw new Error(`Failed to update delivery times: ${error.message}`)
+  }
+}
+
+// User book delivery times functions (per-book scheduling)
+export async function getUserBookDeliveryTimes(userBookId: string): Promise<UserBookDeliveryTime[]> {
+  try {
+    const { data, error } = await supabase
+      .from('user_book_delivery_times')
+      .select('*')
+      .eq('user_book_id', userBookId)
+      .order('delivery_time')
+    
+    if (error) throw error
+    
+    return (data || []).map(row => ({
+      id: row.id,
+      userBookId: row.user_book_id,
+      deliveryTime: row.delivery_time,
+      createdAt: row.created_at
+    }))
+  } catch (error) {
+    console.error('Error getting book delivery times:', error)
+    return []
+  }
+}
+
+export async function setUserBookDeliveryTimes(
+  userBookId: string,
+  times: string[]
+): Promise<void> {
+  try {
+    // Delete existing times for this book
+    const { error: deleteError } = await supabase
+      .from('user_book_delivery_times')
+      .delete()
+      .eq('user_book_id', userBookId)
+    
+    if (deleteError) throw deleteError
+    
+    // Insert new times
+    if (times.length > 0) {
+      const records = times.map(time => ({
+        user_book_id: userBookId,
+        delivery_time: time
+      }))
+      
+      const { error: insertError } = await supabase
+        .from('user_book_delivery_times')
+        .insert(records)
+      
+      if (insertError) throw insertError
+    }
+  } catch (error) {
+    console.error('Error setting book delivery times:', error)
+    throw new Error(`Failed to update book delivery times: ${error.message}`)
   }
 }
 

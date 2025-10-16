@@ -46,8 +46,7 @@ A user is eligible for a lesson if:
 - **Users Table**: Stores user email, timezone, and metadata
 - **User Delivery Times**: Multiple preferred send times per user
 - **Books & Lessons**: Content structure and sequencing
-- **User Books**: Book assignments and ordering
-- **User Progress**: Tracks last lesson sent per book
+- **User Books**: Book assignments, ordering, and progress tracking (includes last_lesson_sent)
 - **Email Logs**: Complete history of scheduling decisions
 
 ### Execution Layer
@@ -76,7 +75,7 @@ A user is eligible for a lesson if:
 - **Day 8**: "Atomic Habits" complete, starts "Deep Work - Day 1"
 
 ### Progress Tracking
-- System maintains `user_progress` record for each book
+- System maintains progress in `user_books` table for each book assignment
 - Tracks `last_lesson_sent` to know next lesson to deliver
 - Handles book transitions automatically
 - Logs all decisions for audit and debugging

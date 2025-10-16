@@ -1,8 +1,9 @@
 "use client";
 
 import { use, useState, useEffect } from "react";
-import { listUsers, getAssignedBooks, listBooks, getCurrentBookProgress, listLessonsForBook, setAssignedBooks, getUserDeliveryTimes, setUserDeliveryTimes } from "@/lib/supabaseDb";
+import { listUsers, getAssignedBooks, listBooks, getCurrentBookProgress, listLessonsForBook, setAssignedBooks, getUserDeliveryTimes, setUserDeliveryTimes, updateUserTimezone, setUserBookDeliveryTimes } from "@/lib/supabaseDb";
 import { formatDeliveryTime, parseTimeToString, ALL_HOURS, MINUTE_OPTIONS, QUICK_SELECT_TIMES } from "@/lib/time";
+import { COMMON_TIMEZONES } from "@/lib/timezones";
 import type { UUID, User, AssignedBookDetail, Book, UserBook, UserDeliveryTime } from "@/types/domain";
 
 export default function UserDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -31,6 +32,19 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
   // New time input state
   const [newHour, setNewHour] = useState(9);
   const [newMinute, setNewMinute] = useState(0);
+
+  // Timezone editing state
+  const [showTimezoneModal, setShowTimezoneModal] = useState(false);
+  const [selectedTimezone, setSelectedTimezone] = useState('Europe/London');
+  const [savingTimezone, setSavingTimezone] = useState(false);
+  const [timezoneError, setTimezoneError] = useState('');
+
+  // Book-specific delivery times state
+  const [showBookTimeModal, setShowBookTimeModal] = useState(false);
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [selectedBookTimes, setSelectedBookTimes] = useState<string[]>([]);
+  const [savingBookTimes, setSavingBookTimes] = useState(false);
+  const [bookTimeError, setBookTimeError] = useState('');
 
   // Load user data on mount
   useEffect(() => {
@@ -139,6 +153,45 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  async function handleSaveTimezone() {
+    try {
+      setSavingTimezone(true);
+      setTimezoneError('');
+      await updateUserTimezone(user.id, selectedTimezone);
+      setShowTimezoneModal(false);
+      
+      // Reload user data
+      const users = await listUsers();
+      const updatedUser = users.find(u => u.id === userId);
+      setUser(updatedUser || null);
+    } catch (error) {
+      console.error('Failed to update timezone:', error);
+      setTimezoneError('Failed to update timezone. Please try again.');
+    } finally {
+      setSavingTimezone(false);
+    }
+  }
+
+  async function handleSaveBookTimes() {
+    if (!editingBookId) return;
+    
+    try {
+      setSavingBookTimes(true);
+      setBookTimeError('');
+      await setUserBookDeliveryTimes(editingBookId, selectedBookTimes);
+      setShowBookTimeModal(false);
+      
+      // Reload assigned books to show updated times
+      const assignedData = await getAssignedBooks(userId);
+      setAssignedBooksState(assignedData);
+    } catch (error) {
+      console.error('Failed to save book delivery times:', error);
+      setBookTimeError('Failed to save delivery times. Please try again.');
+    } finally {
+      setSavingBookTimes(false);
+    }
+  }
+
   function toggleBook(id: UUID) {
     setSelected(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
   }
@@ -161,19 +214,65 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">{user.email}</h1>
-          <div className="opacity-80">Timezone: {user.timezone}</div>
+          <div className="flex items-center gap-2 opacity-80">
+            <span>Timezone: {user.timezone || 'Not set'}</span>
+            <button 
+              className="text-blue-600 underline text-sm" 
+              onClick={() => {
+                setSelectedTimezone(user.timezone || 'Europe/London');
+                setShowTimezoneModal(true);
+                setTimezoneError('');
+              }}
+            >
+              Edit
+            </button>
+          </div>
         </div>
         <button className="px-3 py-2 border rounded" onClick={() => {setShowAssign(true); setAssignError("");}}>Assign Books</button>
       </div>
 
-      <section className="space-y-2">
+      <section className="space-y-3">
         <h2 className="font-medium">Assigned Books (in order)</h2>
-        <ol className="list-decimal list-inside space-y-1">
-          {assignedBooks.map(a => (
-            <li key={a.userBook.id}>{a.book.title}</li>
-          ))}
-          {assignedBooks.length === 0 && <div className="opacity-70">No books assigned.</div>}
-        </ol>
+        {assignedBooks.map((a, index) => (
+          <div key={a.userBook.id} className="border rounded p-3 space-y-2">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="font-medium">
+                  {index + 1}. {a.book.title}
+                </div>
+                <div className="text-sm opacity-70">
+                  Progress: {a.userBook.lastLessonSent || 0} lessons sent
+                </div>
+              </div>
+              <button
+                className="text-blue-600 text-sm underline"
+                onClick={() => {
+                  setEditingBookId(a.userBook.id);
+                  setSelectedBookTimes(a.deliveryTimes || []);
+                  setShowBookTimeModal(true);
+                  setBookTimeError('');
+                }}
+              >
+                {a.deliveryTimes && a.deliveryTimes.length > 0 ? 'Edit Times' : 'Set Times'}
+              </button>
+            </div>
+            
+            {a.deliveryTimes && a.deliveryTimes.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {a.deliveryTimes.map(time => (
+                  <span key={time} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">
+                    {formatDeliveryTime(time)}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm opacity-60">No delivery times set</div>
+            )}
+          </div>
+        ))}
+        {assignedBooks.length === 0 && (
+          <div className="opacity-70">No books assigned.</div>
+        )}
       </section>
 
       <section className="space-y-2">
@@ -260,6 +359,52 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
                 disabled={assigning}
               >
                 {assigning ? 'Assigning...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTimezoneModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-background text-foreground rounded shadow-lg p-4 w-full max-w-md space-y-3">
+            <h3 className="text-lg font-medium">Edit Timezone</h3>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Select Timezone:</label>
+              <select
+                value={selectedTimezone}
+                onChange={(e) => setSelectedTimezone(e.target.value)}
+                className="w-full border rounded px-3 py-2 bg-white"
+              >
+                {COMMON_TIMEZONES.map(tz => (
+                  <option key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {timezoneError && (
+              <div className="text-red-600 text-sm p-2 bg-red-50 border border-red-200 rounded">
+                {timezoneError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button 
+                className="px-3 py-2 border rounded" 
+                onClick={() => setShowTimezoneModal(false)}
+                disabled={savingTimezone}
+              >
+                Cancel
+              </button>
+              <button 
+                className="px-3 py-2 border rounded bg-foreground text-background disabled:opacity-50" 
+                onClick={handleSaveTimezone}
+                disabled={savingTimezone}
+              >
+                {savingTimezone ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>
@@ -366,6 +511,123 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
                 disabled={savingTimes}
               >
                 {savingTimes ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBookTimeModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-background text-foreground rounded shadow-lg p-4 w-full max-w-lg space-y-3">
+            <h3 className="text-lg font-medium">
+              Edit Delivery Times - {assignedBooks.find(a => a.userBook.id === editingBookId)?.book.title}
+            </h3>
+            
+            <div className="space-y-4">
+              {/* Time Input Section */}
+              <div className="border rounded p-3 bg-gray-50">
+                <div className="text-sm font-medium mb-2">Add New Time:</div>
+                <div className="flex items-center gap-2">
+                  <select 
+                    value={newHour} 
+                    onChange={e => setNewHour(Number(e.target.value))}
+                    className="border rounded px-2 py-1 bg-white"
+                  >
+                    {ALL_HOURS.map(hour => (
+                      <option key={hour.value} value={hour.value}>{hour.label}</option>
+                    ))}
+                  </select>
+                  <span>:</span>
+                  <select 
+                    value={newMinute} 
+                    onChange={e => setNewMinute(Number(e.target.value))}
+                    className="border rounded px-2 py-1 bg-white"
+                  >
+                    {MINUTE_OPTIONS.map(min => (
+                      <option key={min.value} value={min.value}>{min.label}</option>
+                    ))}
+                  </select>
+                  <button 
+                    onClick={() => {
+                      const timeString = parseTimeToString(newHour, newMinute);
+                      if (!selectedBookTimes.includes(timeString)) {
+                        setSelectedBookTimes(prev => [...prev, timeString].sort());
+                      }
+                    }}
+                    className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+                    disabled={selectedBookTimes.includes(parseTimeToString(newHour, newMinute))}
+                  >
+                    Add Time
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Select Section */}
+              <div>
+                <div className="text-sm font-medium mb-2">Quick Select:</div>
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_SELECT_TIMES.map(time => (
+                    <button
+                      key={time.value}
+                      onClick={() => {
+                        if (!selectedBookTimes.includes(time.value)) {
+                          setSelectedBookTimes(prev => [...prev, time.value].sort());
+                        }
+                      }}
+                      className="px-3 py-1 border rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={selectedBookTimes.includes(time.value)}
+                    >
+                      {time.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Selected Times Section */}
+              {selectedBookTimes.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Selected Times:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedBookTimes.sort().map(time => (
+                      <span 
+                        key={time} 
+                        className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs flex items-center gap-1"
+                      >
+                        {formatDeliveryTime(time)}
+                        <button
+                          onClick={() => setSelectedBookTimes(prev => prev.filter(t => t !== time))}
+                          className="ml-1 text-blue-600 hover:text-blue-800"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {bookTimeError && (
+              <div className="text-red-600 text-sm p-2 bg-red-50 border border-red-200 rounded">
+                {bookTimeError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button 
+                className="px-3 py-2 border rounded" 
+                onClick={() => setShowBookTimeModal(false)}
+                disabled={savingBookTimes}
+              >
+                Cancel
+              </button>
+              <button 
+                className="px-3 py-2 border rounded bg-foreground text-background disabled:opacity-50" 
+                onClick={handleSaveBookTimes}
+                disabled={savingBookTimes}
+              >
+                {savingBookTimes ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>

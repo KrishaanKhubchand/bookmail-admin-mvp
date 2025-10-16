@@ -17,10 +17,13 @@ export default function UsersPage() {
   const [timezone, setTimezone] = useState(COMMON_TIMEZONES[0].value);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  // Add state to track if component is mounted (client-side)
+  const [isMounted, setIsMounted] = useState(false);
 
   // Load users on mount
   useEffect(() => {
     loadUsers();
+    setIsMounted(true); // Mark as mounted after first render
   }, []);
 
   async function loadUsers() {
@@ -112,7 +115,8 @@ export default function UsersPage() {
             <tbody>
               {users.map(u => {
                 const progress = userProgresses[u.id] || 0;
-                const nextSend = formatNextSendAt(u.timezone);
+                // Only calculate nextSend after component is mounted on client
+                const nextSend = isMounted ? formatNextSendAt(u.timezone) : "—";
                 return (
                   <tr key={u.id} className="border-b hover:bg-black/[.03] dark:hover:bg-white/[.04]">
                     <td className="py-2 pr-4">

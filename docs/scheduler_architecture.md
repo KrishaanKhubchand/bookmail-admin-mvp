@@ -51,8 +51,12 @@ The BookMail email scheduler is built on a modern serverless architecture using 
 CREATE TABLE users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email citext UNIQUE NOT NULL,
-  timezone text NOT NULL,           -- IANA timezone (e.g., 'America/New_York')
-  created_at timestamptz DEFAULT now()
+  timezone text,                    -- IANA timezone (e.g., 'America/New_York')
+  created_at timestamptz DEFAULT now(),
+  reading_capacity integer DEFAULT 1,  -- 1-4 books simultaneously (future feature)
+  subscription_status text DEFAULT 'free',  -- 'free', 'premium', etc.
+  subscription_current_period_end timestamptz,
+  stripe_customer_id text
 );
 ```
 
@@ -74,6 +78,7 @@ CREATE TABLE books (
   title text NOT NULL,
   author text NOT NULL,
   description text,
+  book_cover_image_url text,        -- URL to book cover image
   created_at timestamptz DEFAULT now()
 );
 ```
@@ -98,24 +103,17 @@ CREATE TABLE user_books (
   user_id uuid REFERENCES users(id) ON DELETE CASCADE,
   book_id uuid REFERENCES books(id) ON DELETE CASCADE,
   order_index integer NOT NULL,     -- Book sequence for user (1, 2, 3...)
+  last_lesson_sent integer DEFAULT 0,  -- Progress tracking: last day number sent
+  progress_updated_at timestamptz DEFAULT now(),
+  assigned_at timestamptz DEFAULT now(),
+  status text DEFAULT 'queued',     -- 'queued', 'currently_reading', 'completed'
+  started_at timestamptz,
   created_at timestamptz DEFAULT now(),
   UNIQUE(user_id, book_id),
   UNIQUE(user_id, order_index)
 );
 ```
-
-#### `user_progress`
-```sql
-CREATE TABLE user_progress (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
-  book_id uuid REFERENCES books(id) ON DELETE CASCADE,
-  last_lesson_sent integer DEFAULT 0,  -- Last day_number sent
-  completed_at timestamptz,
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(user_id, book_id)
-);
-```
+Note: Progress tracking was consolidated into this table from the deprecated `user_progress` table.
 
 #### `email_logs`
 ```sql
@@ -183,20 +181,20 @@ BEGIN
     b.title,
     l.day_number,
     l.subject,
-    COALESCE(up.last_lesson_sent, 0) as current_progress,
+    COALESCE(ub.last_lesson_sent, 0) as current_progress,
     (SELECT COUNT(*)::int FROM lessons WHERE lessons.book_id = l.book_id) as total_lessons,
     -- Should send if we haven't completed all lessons
-    (COALESCE(up.last_lesson_sent, 0) + 1) <= (SELECT COUNT(*) FROM lessons WHERE lessons.book_id = l.book_id) as should_send
+    (COALESCE(ub.last_lesson_sent, 0) + 1) <= (SELECT COUNT(*) FROM lessons WHERE lessons.book_id = l.book_id) as should_send
   FROM user_books ub
   JOIN books b ON ub.book_id = b.id
-  LEFT JOIN user_progress up ON up.user_id = ub.user_id AND up.book_id = ub.book_id
-  LEFT JOIN lessons l ON l.book_id = ub.book_id AND l.day_number = (COALESCE(up.last_lesson_sent, 0) + 1)
+  LEFT JOIN lessons l ON l.book_id = ub.book_id AND l.day_number = (COALESCE(ub.last_lesson_sent, 0) + 1)
   WHERE ub.user_id = p_user_id
   ORDER BY ub.order_index
   LIMIT 1;
 END;
 $$ LANGUAGE plpgsql;
 ```
+Note: Progress is now tracked in `user_books.last_lesson_sent` instead of a separate `user_progress` table.
 
 ### Views
 
